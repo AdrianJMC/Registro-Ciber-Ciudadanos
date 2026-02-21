@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registro Ciber-Ciudadanos</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div id="app">
+        <form @submit.prevent="enviarRegistro">
+            <h2>Registro de Ciudadanos</h2>
+
+            <div class="input-group">
+                <input type="text" v-model="form.username" placeholder="Nombre de usuario" required>
+            </div>
+
+            <div class="input-group">
+                <input type="email" v-model="form.email" placeholder="Correo electrónico"
+                    :class="{'input-error': form.email && !emailValido, 'input-success': emailValido}" required>
+                <p v-if="form.email && !emailValido" class="error">
+                    Formato inválido (ejemplo: usuario@dominio.com)
+                </p>
+            </div>
+
+            <div class="input-group">
+                <input type="password" v-model="form.password" placeholder="Contraseña (Min. 8, A-Z, 0-9)" minlength="8"
+                    required>
+                <p v-if="form.password && !passwordValida" class="error">Debe incluir una mayúscula y un número.</p>
+            </div>
+
+            <div class="input-group">
+                <input type="password" v-model="form.confirmPassword" placeholder="Confirmar contraseña" required>
+                <p v-if="form.confirmPassword && form.password !== form.confirmPassword" class="error">Las contraseñas
+                    no coinciden.</p>
+            </div>
+
+            <div class="captcha-box">
+                <label>Verificación Humana: {{ captchaQuestion }}</label>
+                <input type="number" v-model="form.captchaUser" placeholder="Tu respuesta" required>
+            </div>
+
+            <button :disabled="!formularioCompleto">Crear Cuenta</button>
+
+            <div v-if="mensaje" :class="['mensaje-api', status === 'success' ? 'success' : 'error-msg']">
+                {{ mensaje }}
+            </div>
+        </form>
+    </div>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script>
+        const { createApp, ref, computed, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const form = ref({ username: '', email: '', password: '', confirmPassword: '', captchaUser: null });
+                const captchaQuestion = ref('');
+                const captchaServerRes = ref(null);
+                const mensaje = ref('');
+                const status = ref('');
+
+                // Regex para Password
+                const passwordValida = computed(() => {
+                    return /^(?=.*[A-Z])(?=.*\d).{8,}$/.test(form.value.password);
+                });
+
+                // Regex para Email 
+                const emailValido = computed(() => {
+                    const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    return regex.test(form.value.email);
+                });
+
+                // El botón solo se activa si TODO es válido en el Front
+                const formularioCompleto = computed(() => {
+                    return form.value.username.length > 2 &&
+                        emailValido.value &&
+                        passwordValida.value &&
+                        form.value.password === form.value.confirmPassword &&
+                        form.value.captchaUser !== null;
+                });
+
+                const cargarCaptcha = async () => {
+                    try {
+                        const res = await fetch('http://localhost:4000/api/captcha');
+                        const data = await res.json();
+                        captchaQuestion.value = data.question;
+                        captchaServerRes.value = data.answer;
+                    } catch (e) {
+                        mensaje.value = "Error de conexión con el servidor.";
+                        status.value = "error";
+                    }
+                };
+
+                const enviarRegistro = async () => {
+                    mensaje.value = "Enviando..."; // Feedback visual de carga
+
+                    try {
+                        const res = await fetch('http://localhost:4000/api/register', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                ...form.value,
+                                captchaServer: captchaServerRes.value // Enviamos lo que el servidor esperaba
+                            })
+                        });
+
+                        const data = await res.json();
+
+                        if (!res.ok) {
+                            // Si el servidor manda un 400 (error de captcha, email duplicado, etc)
+                            mensaje.value = data.error;
+                            status.value = 'error';
+                            // Si el captcha falló, cargamos uno nuevo por seguridad
+                            if (data.error.includes("Captcha")) cargarCaptcha();
+                        } else {
+                            mensaje.value = data.message;
+                            status.value = 'success';
+                            // Limpiar formulario tras éxito
+                            form.value = { username: '', email: '', password: '', confirmPassword: '', captchaUser: null };
+                            cargarCaptcha();
+                        }
+                    } catch (error) {
+                        mensaje.value = "Error crítico en el sistema.";
+                        status.value = 'error';
+                    }
+                };
+
+                onMounted(cargarCaptcha);
+
+                return { form, captchaQuestion, passwordValida, emailValido, formularioCompleto, enviarRegistro, mensaje, status };
+            }
+        }).mount('#app');
+    </script>
+
+</body>
+
+</html>
